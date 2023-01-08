@@ -8,6 +8,599 @@
     : (e.supabase = t())
 })(self, () =>
   (() => {
+    var fetch = function (input, init) {
+      var parseHeaders = function (rawHeaders) {
+        var headers = new Headers() // Replace instances of \r\n and \n followed by at least one space or horizontal tab with a space
+        // https://tools.ietf.org/html/rfc7230#section-3.2
+
+        var preProcessedHeaders = rawHeaders.replace(/\r?\n[\t ]+/g, ' ')
+        preProcessedHeaders.split(/\r?\n/).forEach(function (line) {
+          var parts = line.split(':')
+          var key = parts.shift().trim()
+
+          if (key) {
+            var value = parts.join(':').trim()
+            headers.append(key, value)
+          }
+        })
+        return headers
+      }
+
+      return new Promise(function (resolve, reject) {
+        var request = new Request(input, init)
+
+        if (request.signal && request.signal.aborted) {
+          return reject(new DOMException('Aborted', 'AbortError'))
+        }
+
+        var xhr = new XMLHttpRequest()
+
+        function abortXhr() {
+          xhr.abort()
+        }
+
+        xhr.onload = function () {
+          var specialStatus = [101, 204, 205, 304]
+
+          var options = {
+            status: xhr.status,
+            statusText: xhr.statusText,
+            headers: parseHeaders(xhr.getAllResponseHeaders() || ''),
+          }
+          options.url =
+            'responseURL' in xhr ? xhr.responseURL : options.headers.get('X-Request-URL')
+          var body = 'response' in xhr ? xhr.response : xhr.responseText
+          resolve(new Response(specialStatus.includes(xhr.status) ? null : body, options))
+        }
+
+        xhr.onerror = function () {
+          reject(new TypeError('Network request failed'))
+        }
+
+        xhr.ontimeout = function () {
+          reject(new TypeError('Network request failed'))
+        }
+
+        xhr.onabort = function () {
+          reject(new DOMException('Aborted', 'AbortError'))
+        }
+
+        xhr.open(request.method, request.url, true)
+
+        if (request.credentials === 'include') {
+          xhr.withCredentials = true
+        } else if (request.credentials === 'omit') {
+          xhr.withCredentials = false
+        }
+
+        // if ('responseType' in xhr && support.blob) {
+        //   xhr.responseType = 'blob';
+        // }
+
+        request.headers.forEach(function (value, name) {
+          xhr.setRequestHeader(name, value)
+        })
+
+        if (request.signal) {
+          request.signal.addEventListener('abort', abortXhr)
+
+          xhr.onreadystatechange = function () {
+            // DONE (success or failure)
+            if (xhr.readyState === 4) {
+              request.signal.removeEventListener('abort', abortXhr)
+            }
+          }
+        }
+
+        xhr.send(typeof request._bodyInit === 'undefined' ? null : request._bodyInit)
+      })
+    }
+
+    var URLSearchParams = (function () {
+      var checkIfIteratorIsSupported = function () {
+        try {
+          return !!Symbol.iterator
+        } catch (error) {
+          return false
+        }
+      }
+
+      var iteratorSupported = checkIfIteratorIsSupported()
+
+      var createIterator = function (items) {
+        var iterator = {
+          next: function () {
+            var value = items.shift()
+            return {
+              done: value === void 0,
+              value: value,
+            }
+          },
+        }
+
+        if (iteratorSupported) {
+          iterator[Symbol.iterator] = function () {
+            return iterator
+          }
+        }
+
+        return iterator
+      }
+
+      var serializeParam = function (value) {
+        return encodeURIComponent(value).replace(/%20/g, '+')
+      }
+
+      var deserializeParam = function (value) {
+        return decodeURIComponent(String(value).replace(/\+/g, ' '))
+      }
+
+      function URLSearchParams(searchString) {
+        Object.defineProperty(this, '_entries', {
+          writable: true,
+          value: {},
+        })
+        var typeofSearchString = typeof searchString
+
+        if (typeofSearchString === 'undefined') {
+          // do nothing
+        } else if (typeofSearchString === 'string') {
+          if (searchString !== '') {
+            this._fromString(searchString)
+          }
+        } else if (searchString instanceof URLSearchParams) {
+          var _this = this
+          searchString.forEach(function (value, name) {
+            _this.append(name, value)
+          })
+        } else if (searchString !== null && typeofSearchString === 'object') {
+          if (Object.prototype.toString.call(searchString) === '[object Array]') {
+            for (var i = 0; i < searchString.length; i++) {
+              var entry = searchString[i]
+              if (
+                Object.prototype.toString.call(entry) === '[object Array]' ||
+                entry.length !== 2
+              ) {
+                this.append(entry[0], entry[1])
+              } else {
+                throw new TypeError(
+                  'Expected [string, any] as entry at index ' + i + " of URLSearchParams's input"
+                )
+              }
+            }
+          } else {
+            for (var key in searchString) {
+              if (searchString.hasOwnProperty(key)) {
+                this.append(key, searchString[key])
+              }
+            }
+          }
+        } else {
+          throw new TypeError("Unsupported input's type for URLSearchParams")
+        }
+      }
+      URLSearchParams.prototype.append = function (name, value) {
+        if (name in this._entries) {
+          this._entries[name].push(String(value))
+        } else {
+          this._entries[name] = [String(value)]
+        }
+      }
+
+      URLSearchParams.prototype.delete = function (name) {
+        delete this._entries[name]
+      }
+
+      URLSearchParams.prototype.get = function (name) {
+        return name in this._entries ? this._entries[name][0] : null
+      }
+
+      URLSearchParams.prototype.getAll = function (name) {
+        return name in this._entries ? this._entries[name].slice(0) : []
+      }
+
+      URLSearchParams.prototype.has = function (name) {
+        return name in this._entries
+      }
+
+      URLSearchParams.prototype.set = function (name, value) {
+        this._entries[name] = [String(value)]
+      }
+
+      URLSearchParams.prototype.forEach = function (callback, thisArg) {
+        var entries
+        for (var name in this._entries) {
+          if (this._entries.hasOwnProperty(name)) {
+            entries = this._entries[name]
+            for (var i = 0; i < entries.length; i++) {
+              callback.call(thisArg, entries[i], name, this)
+            }
+          }
+        }
+      }
+
+      URLSearchParams.prototype.keys = function () {
+        var items = []
+        this.forEach(function (value, name) {
+          items.push(name)
+        })
+        return createIterator(items)
+      }
+
+      URLSearchParams.prototype.values = function () {
+        var items = []
+        this.forEach(function (value) {
+          items.push(value)
+        })
+        return createIterator(items)
+      }
+
+      URLSearchParams.prototype.entries = function () {
+        var items = []
+        this.forEach(function (value, name) {
+          items.push([name, value])
+        })
+        return createIterator(items)
+      }
+
+      if (iteratorSupported) {
+        URLSearchParams.prototype[Symbol.iterator] = URLSearchParams.prototype.entries
+      }
+
+      URLSearchParams.prototype.toString = function () {
+        var searchArray = []
+        this.forEach(function (value, name) {
+          searchArray.push(serializeParam(name) + '=' + serializeParam(value))
+        })
+        return searchArray.join('&')
+      }
+
+      URLSearchParams.prototype.sort = function () {
+        var _this = this
+        var items = []
+        this.forEach(function (value, name) {
+          items.push([name, value])
+          if (!_this._entries) {
+            _this.delete(name)
+          }
+        })
+        items.sort(function (a, b) {
+          if (a[0] < b[0]) {
+            return -1
+          } else if (a[0] > b[0]) {
+            return +1
+          } else {
+            return 0
+          }
+        })
+        if (_this._entries) {
+          // force reset because IE keeps keys index
+          _this._entries = {}
+        }
+        for (var i = 0; i < items.length; i++) {
+          this.append(items[i][0], items[i][1])
+        }
+      }
+      Object.defineProperty(URLSearchParams.prototype, '_fromString', {
+        enumerable: false,
+        configurable: false,
+        writable: false,
+        value: function (searchString) {
+          if (this._entries) {
+            this._entries = {}
+          } else {
+            var keys = []
+            this.forEach(function (value, name) {
+              keys.push(name)
+            })
+            for (var i = 0; i < keys.length; i++) {
+              this.delete(keys[i])
+            }
+          }
+
+          searchString = searchString.replace(/^\?/, '')
+          var attributes = searchString.split('&')
+          var attribute
+          for (var i = 0; i < attributes.length; i++) {
+            attribute = attributes[i].split('=')
+            this.append(
+              deserializeParam(attribute[0]),
+              attribute.length > 1 ? deserializeParam(attribute[1]) : ''
+            )
+          }
+        },
+      })
+
+      return URLSearchParams
+    })()
+
+    var URL = (function () {
+      var __assign =
+        Object.assign ||
+        function (t) {
+          for (var s, i = 1, n = arguments.length; i < n; i++) {
+            s = arguments[i]
+            for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p)) t[p] = s[p]
+          }
+          return t
+        }
+
+      function URL(url, base) {
+        // var baseParts;
+        // try {
+        //     baseParts = URL.parse(base);
+        // }
+        // catch (e) {
+        //     throw new Error('Invalid base URL');
+        // }
+        var urlParts = URL.parse(url)
+        if (urlParts.protocol) {
+          this._parts = __assign({}, urlParts)
+        }
+        // else {
+        //     this._parts = {
+        //         protocol: baseParts.protocol,
+        //         username: baseParts.username,
+        //         password: baseParts.password,
+        //         hostname: baseParts.hostname,
+        //         port: baseParts.port,
+        //         path: urlParts.path || baseParts.path,
+        //         query: urlParts.query || baseParts.query,
+        //         hash: urlParts.hash,
+        //     };
+        // }
+        // console.log(URL.parse(base), URL.parse(url), this._parts);
+      }
+      URL.init = function () {
+        this.URLRegExp = new RegExp(
+          '^' +
+            this.patterns.protocol +
+            '?' +
+            this.patterns.authority +
+            '?' +
+            this.patterns.path +
+            this.patterns.query +
+            '?' +
+            this.patterns.hash +
+            '?'
+        )
+        this.AuthorityRegExp = new RegExp(
+          '^' +
+            this.patterns.authentication +
+            '?' +
+            this.patterns.hostname +
+            this.patterns.port +
+            '?$'
+        )
+      }
+      URL.parse = function (url) {
+        this.URLRegExp = new RegExp(
+          '^' +
+            this.patterns.protocol +
+            '?' +
+            this.patterns.authority +
+            '?' +
+            this.patterns.path +
+            this.patterns.query +
+            '?' +
+            this.patterns.hash +
+            '?'
+        )
+        this.AuthorityRegExp = new RegExp(
+          '^' +
+            this.patterns.authentication +
+            '?' +
+            this.patterns.hostname +
+            this.patterns.port +
+            '?$'
+        )
+
+        var urlMatch = this.URLRegExp.exec(url)
+        if (urlMatch !== null) {
+          var authorityMatch = urlMatch[2]
+            ? this.AuthorityRegExp.exec(urlMatch[2])
+            : [null, null, null, null, null]
+          if (authorityMatch !== null) {
+            return {
+              protocol: urlMatch[1] || '',
+              username: authorityMatch[1] || '',
+              password: authorityMatch[2] || '',
+              hostname: authorityMatch[3] || '',
+              port: authorityMatch[4] || '',
+              path: urlMatch[3] || '',
+              query: urlMatch[4] || '',
+              hash: urlMatch[5] || '',
+            }
+          }
+        }
+        throw new Error('Invalid URL')
+      }
+      Object.defineProperty(URL.prototype, 'hash', {
+        get: function () {
+          return this._parts.hash
+        },
+        set: function (value) {
+          value = value.toString()
+          if (value.length === 0) {
+            this._parts.hash = ''
+          } else {
+            if (value.charAt(0) !== '#') value = '#' + value
+            this._parts.hash = encodeURIComponent(value)
+          }
+        },
+        enumerable: true,
+        configurable: true,
+      })
+      Object.defineProperty(URL.prototype, 'host', {
+        get: function () {
+          return this.hostname + (this.port ? ':' + this.port : '')
+        },
+        set: function (value) {
+          value = value.toString()
+          var url = new URL('http://' + value)
+          this._parts.hostname = url.hostname
+          this._parts.port = url.port
+        },
+        enumerable: true,
+        configurable: true,
+      })
+      Object.defineProperty(URL.prototype, 'hostname', {
+        get: function () {
+          return this._parts.hostname
+        },
+        set: function (value) {
+          value = value.toString()
+          this._parts.hostname = encodeURIComponent(value)
+        },
+        enumerable: true,
+        configurable: true,
+      })
+      Object.defineProperty(URL.prototype, 'href', {
+        get: function () {
+          var authentication =
+            this.username || this.password
+              ? this.username + (this.password ? ':' + this.password : '') + '@'
+              : ''
+          return (
+            this.protocol +
+            '//' +
+            authentication +
+            this.host +
+            this.pathname +
+            this.search +
+            this.hash
+          )
+        },
+        set: function (value) {
+          value = value.toString()
+          var url = new URL(value)
+          this._parts = __assign({}, url._parts)
+        },
+        enumerable: true,
+        configurable: true,
+      })
+      Object.defineProperty(URL.prototype, 'origin', {
+        get: function () {
+          return this.protocol + '//' + this.host
+        },
+        enumerable: true,
+        configurable: true,
+      })
+      Object.defineProperty(URL.prototype, 'password', {
+        get: function () {
+          return this._parts.password
+        },
+        set: function (value) {
+          value = value.toString()
+          this._parts.password = encodeURIComponent(value)
+        },
+        enumerable: true,
+        configurable: true,
+      })
+      Object.defineProperty(URL.prototype, 'pathname', {
+        get: function () {
+          return this._parts.path ? this._parts.path : '/'
+        },
+        set: function (value) {
+          value = value.toString()
+          if (value.length === 0 || value.charAt(0) !== '/') value = '/' + value
+          this._parts.path = encodeURIComponent(value)
+        },
+        enumerable: true,
+        configurable: true,
+      })
+      Object.defineProperty(URL.prototype, 'port', {
+        get: function () {
+          return this._parts.port
+        },
+        set: function (value) {
+          var port = parseInt(value)
+          if (isNaN(port)) {
+            this._parts.port = '0'
+          } else {
+            this._parts.port = Math.max(0, port % Math.pow(2, 16)).toString()
+          }
+        },
+        enumerable: true,
+        configurable: true,
+      })
+      Object.defineProperty(URL.prototype, 'protocol', {
+        get: function () {
+          return this._parts.protocol + ':'
+        },
+        set: function (value) {
+          value = value.toString()
+          if (value.length !== 0) {
+            if (value.charAt(value.length - 1) === ':') {
+              value = value.slice(0, -1)
+            }
+            this._parts.protocol = encodeURIComponent(value)
+          }
+        },
+        enumerable: true,
+        configurable: true,
+      })
+      Object.defineProperty(URL.prototype, 'search', {
+        get: function () {
+          return this._parts.query
+        },
+        set: function (value) {
+          value = value.toString()
+          if (value.charAt(0) !== '?') value = '?' + value
+          this._parts.query = value
+        },
+        enumerable: true,
+        configurable: true,
+      })
+      Object.defineProperty(URL.prototype, 'username', {
+        get: function () {
+          return this._parts.username
+        },
+        set: function (value) {
+          value = value.toString()
+          this._parts.username = encodeURIComponent(value)
+        },
+        enumerable: true,
+        configurable: true,
+      })
+      Object.defineProperty(URL.prototype, 'searchParams', {
+        get: function () {
+          var _this = this
+          var searchParams = new URLSearchParams(this.search)
+          ;['append', 'delete', 'set'].forEach(function (methodName) {
+            var method = searchParams[methodName]
+            searchParams[methodName] = function () {
+              var args = []
+              for (var _i = 0; _i < arguments.length; _i++) {
+                args[_i] = arguments[_i]
+              }
+              method.apply(searchParams, args)
+              _this.search = searchParams.toString()
+            }
+          })
+          return searchParams
+        },
+        enumerable: true,
+        configurable: true,
+      })
+      URL.prototype.toString = function () {
+        return this.href
+      }
+      // createObjectURL(object: any, options?: ObjectURLOptions): string;
+      // revokeObjectURL(url: string): void;
+      URL.patterns = {
+        protocol: '(?:([^:/?#]+):)',
+        authority: '(?://([^/?#]*))',
+        path: '([^?#]*)',
+        query: '(\\?[^#]*)',
+        hash: '(#.*)',
+        authentication: '(?:([^:]*)(?::([^@]*))?@)',
+        hostname: '([^:]+)',
+        port: '(?::(\\d+))',
+      }
+      return URL
+    })()
+
     var e,
       t,
       r = {
