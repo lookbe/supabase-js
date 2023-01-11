@@ -92,7 +92,7 @@
           }
         }
 
-        xhr.send(typeof request._bodyInit === 'undefined' ? null : request._bodyInit)
+        xhr.send(typeof init.body === 'undefined' ? null : init.body)
       })
     }
 
