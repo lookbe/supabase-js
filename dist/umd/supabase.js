@@ -2708,7 +2708,7 @@
               ) {
                 const t = e.reduce((e, t) => e.concat(Object.keys(t)), [])
                 if (t.length > 0) {
-                  const e = [...new Set(t)].map((e) => `"${e}"`)
+                  const e = [...Array.from(new Set(t))].map((e) => `"${e}"`)
                   this.url.searchParams.set('columns', e.join(','))
                 }
               }
